@@ -6,24 +6,48 @@ import zipfile
 from datetime import datetime
 
 # ==========================================
-# 0. PAGE CONFIG & KIOSK MODE (CLEAN UI)
+# 0. PAGE CONFIG & KIOSK MODE (EXTREME CLEAN UI)
 # ==========================================
 
 # This must be the very first Streamlit command
 st.set_page_config(page_title="Payroll Processor", layout="wide")
 
-# CSS to hide the top header, hamburger menu, footer, and "Manage app" button
-# This version targets the deploy button specifically to ensure it's removed.
+# CSS to hide the top header, hamburger menu, footer, "Manage app" button,
+# and specifically the profile container and Streamlit host badge you identified.
 hide_st_style = """
             <style>
-            #MainMenu {visibility: hidden !important;}
-            footer {visibility: hidden !important;}
+            /* Hide the main top header bar */
             header {visibility: hidden !important;}
+            
+            /* Hide the hamburger menu */
+            #MainMenu {visibility: hidden !important;}
+            
+            /* Hide the standard footer */
+            footer {visibility: hidden !important;}
+            
+            /* Hide deployment and "Manage app" buttons */
             .stDeployButton {display:none !important;}
             .stAppDeployButton {display:none !important;}
+            
+            /* TARGET SPECIFIC ELEMENTS FROM YOUR INSPECTION */
+            /* This removes the profile container/avatar in the bottom right */
+            [class*="_profileContainer_"], [class*="_profilePreview_"] {
+                display: none !important;
+            }
+            
+            /* This removes the "Hosted with Streamlit" badge and SVG in the bottom right */
+            [class*="_viewerBadge_"], [class*="_container_gzau3_"] {
+                display: none !important;
+            }
+            
+            /* Generic catch-all for any action buttons or status widgets in the corners */
+            .stActionButton, .stStatusWidget, [data-testid="stStatusWidget"], [data-testid="appCreatorAvatar"] {
+                display: none !important;
+            }
+            
             /* Adjust padding since header is hidden */
             .block-container {
-                padding-top: 2rem !important;
+                padding-top: 1rem !important;
             }
             </style>
             """
@@ -50,13 +74,11 @@ def parse_duration_to_decimal(duration_str):
 def get_week_number(day_str, pay_period_start):
     """Determine which week (1 or 2) a day belongs to."""
     try:
-        # Convert date/datetime object to standardized datetime
         if isinstance(day_str, str):
             date_obj = datetime.strptime(day_str, "%m/%d/%Y")
         else:
             date_obj = day_str
         
-        # Ensure pay_period_start is datetime
         if isinstance(pay_period_start, datetime):
             start_date = pay_period_start
         else:
@@ -74,23 +96,15 @@ def get_week_number(day_str, pay_period_start):
         return None, None
 
 def detect_file_format(file_content_str):
-    """
-    Reads the content string to detect if the file is 
-    'payroll' (Previous Payroll) or 'timeclock' (Timeclock Sheet).
-    """
     try:
-        # Check first 1000 characters for keywords
         head = file_content_str[:1000]
-        
         if 'Previous Payroll Report' in head or 'Reclose Payroll Report' in head:
             return 'payroll'
         elif 'Timeclock Report' in head or 'All Employees:' in head or 'Timeclock Summary' in head:
             return 'timeclock'
-        
         if 'Clockset' in head and 'ACTIVE' in head:
             return 'timeclock'
-            
-        return 'payroll' # Default fallback
+        return 'payroll'
     except Exception as e:
         return None
 
@@ -99,13 +113,10 @@ def detect_file_format(file_content_str):
 # ==========================================
 
 def parse_payroll_structure(content):
-    """Parses the 'Previous Payroll' content string."""
     data = []
     store_no = None
-    
     file_lines = io.StringIO(content)
     
-    # Extract year/date from full content for header logic
     header_year_match = re.search(r'Period: (\d{2})/(\d{2})/(\d{4})', content)
     if header_year_match:
         header_start_month = int(header_year_match.group(1))
@@ -118,7 +129,6 @@ def parse_payroll_structure(content):
         line = line.strip()
         if not line: continue
         
-        # Extract store number
         if "Popeye's" in line or "Popeyes" in line or "POPEYES" in line:
             match = re.search(r"(?:Popeye's|Popeyes|POPEYES)\s*#?\s*(\d+)", line, re.IGNORECASE)
             if not match: 
@@ -127,7 +137,6 @@ def parse_payroll_structure(content):
                 store_no = match.group(1)
             continue
         
-        # Dynamic Line Splitting
         parts = None
         if '","' in line:
             parts = [p.strip().strip('"') for p in line.split('","')]
@@ -138,7 +147,6 @@ def parse_payroll_structure(content):
             parts = [p.strip() for p in line.split(',')]
 
         if parts is None:
-            # Check for Overtime Line
             ot_match = re.match(r'^\s*"?(\d+)\s+([\d\.]+)\s*"?$', line)
             if ot_match:
                 try:
@@ -152,101 +160,57 @@ def parse_payroll_structure(content):
                         'store_no': store_no
                     })
                 except: continue
-                continue
             continue 
 
         day_of_week = parts[0].strip()
         if day_of_week in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']:
             if len(parts) < 11: continue
-            
-            date_str = parts[1].strip()
-            duration_decimal = parts[3].strip() 
-            duration_hhmm = parts[2].strip()
-            emp_id = parts[6].strip()
-            first_name = parts[8].strip() 
-            last_name = parts[9].strip()
-            
-            # Clean ID
+            date_str, duration_decimal, duration_hhmm = parts[1].strip(), parts[3].strip(), parts[2].strip()
+            emp_id, first_name, last_name = parts[6].strip(), parts[8].strip(), parts[9].strip()
             emp_id_match = re.search(r'^(\d+)', emp_id)
             emp_id = emp_id_match.group(1) if emp_id_match else ''
-            
-            # Clean Names
             first_name = re.sub(r'--.*', '', first_name).strip()
             last_name = re.sub(r'--.*', '', last_name).strip()
             
             if duration_decimal in ['--', ''] or not emp_id: continue
             
-            # Date Formatting logic (reused from original)
             full_date = date_str
             try:
                 if '-' in date_str:
-                    if any(m in date_str for m in ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']):
-                        month_match = re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)', date_str)
-                        if month_match:
-                            month_abbr = month_match.group(1)
-                            month_num = datetime.strptime(month_abbr, "%b").month
-                            
-                            if header_start_month == 12 and month_num <= 6:
-                                correct_year = header_start_year + 1
-                            elif header_start_month <= 6 and month_num == 12:
-                                correct_year = header_start_year - 1
-                            else:
-                                correct_year = header_start_year
-                            
-                            date_obj = datetime.strptime(f"{date_str}-{correct_year}", "%d-%b-%Y")
-                            full_date = date_obj.strftime("%m/%d/%Y")
-                    
-                    elif len(date_str.split('-')[0]) <= 2:
-                        parts_date = date_str.split('-')
-                        if len(parts_date) == 2:
-                            month_num = int(parts_date[0]) if len(parts_date[0]) <= 2 else int(parts_date[1])
-                            
-                            if header_start_month == 12 and month_num <= 6:
-                                correct_year = header_start_year + 1
-                            elif header_start_month <= 6 and month_num == 12:
-                                correct_year = header_start_year - 1
-                            else:
-                                correct_year = header_start_year
-                            
-                            date_obj = datetime.strptime(f"{date_str}-{correct_year}", "%m-%d-%Y")
-                            full_date = date_obj.strftime("%m/%d/%Y")
-            except Exception:
-                pass
+                    month_match = re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)', date_str)
+                    if month_match:
+                        month_abbr = month_match.group(1)
+                        month_num = datetime.strptime(month_abbr, "%b").month
+                        if header_start_month == 12 and month_num <= 6:
+                            correct_year = header_start_year + 1
+                        elif header_start_month <= 6 and month_num == 12:
+                            correct_year = header_start_year - 1
+                        else:
+                            correct_year = header_start_year
+                        date_obj = datetime.strptime(f"{date_str}-{correct_year}", "%d-%b-%Y")
+                        full_date = date_obj.strftime("%m/%d/%Y")
+            except: pass
             
             try:
-                decimal_hours = float(duration_decimal)
                 data.append({
-                    'emp_id': emp_id,
-                    'first_name': first_name,
-                    'last_name': last_name,
-                    'day': day_of_week,
-                    'date': full_date,
-                    'start_time': '',
-                    'end_time': '',
-                    'type': 'Clockset',
-                    'duration': duration_hhmm,
-                    'decimal_hours': round(decimal_hours, 2),
-                    'store_no': store_no
+                    'emp_id': emp_id, 'first_name': first_name, 'last_name': last_name,
+                    'day': day_of_week, 'date': full_date, 'start_time': '', 'end_time': '',
+                    'type': 'Clockset', 'duration': duration_hhmm,
+                    'decimal_hours': round(float(duration_decimal), 2), 'store_no': store_no
                 })
-            except ValueError: continue
+            except: continue
 
     df = pd.DataFrame(data)
-    
-    # Map names to Overtime entries
     if not df.empty and 'type' in df.columns:
         name_map = df[df['type'] == 'Clockset'].groupby('emp_id').agg(
-            first_name=('first_name', 'first'),
-            last_name=('last_name', 'first')
+            first_name=('first_name', 'first'), last_name=('last_name', 'first')
         ).reset_index()
-
         for index, row in df[df['type'] == 'Overtime_Reported'].iterrows():
             match = name_map[name_map['emp_id'].str.startswith(str(row['emp_id']), na=False)]
             if not match.empty:
-                df.loc[index, 'first_name'] = match.iloc[0]['first_name']
-                df.loc[index, 'last_name'] = match.iloc[0]['last_name']
+                df.loc[index, 'first_name'], df.loc[index, 'last_name'] = match.iloc[0]['first_name'], match.iloc[0]['last_name']
             else:
                 df.drop(index, inplace=True)
-
     return df, store_no
 
 # ==========================================
@@ -254,82 +218,34 @@ def parse_payroll_structure(content):
 # ==========================================
 
 def parse_timeclock_structure(content):
-    """Parses the 'Timeclock Report' content string."""
     data = []
-    current_emp_id = None
-    current_first_name = None
-    current_last_name = None
-    store_no = None
-    
-    # Split content into lines
+    current_emp_id, current_first_name, current_last_name, store_no = None, None, None, None
     lines = content.splitlines()
-        
     for line in lines:
         line = line.strip()
         if not line: continue
-            
-        if '","' in line:
-            parts = [p.strip().strip('"') for p in line.split('","')]
-        else:
-            parts = [p.strip() for p in line.split(',')]
-        
-        # Store Number
-        if "Popeye's" in parts[0] or 'POPEYES' in parts[0] or "Popeyes" in parts[0] or "POPEYE'S" in parts[0]:
+        parts = [p.strip().strip('"') for p in (line.split('","') if '","' in line else line.split(','))]
+        if any(x in parts[0] for x in ["Popeye's", 'POPEYES', "Popeyes", "POPEYE'S"]):
             match = re.search(r"(?:Popeye's|POPEYES|Popeyes)\s*#?\s*(\d+)", parts[0], re.IGNORECASE)
-            if not match: 
-                match = re.search(r'#(\d+)', parts[0])
-            if match: 
-                store_no = match.group(1)
+            if not match: match = re.search(r'#(\d+)', parts[0])
+            if match: store_no = match.group(1)
             continue
-        # Skip Headers/Footers
-        if any(k in parts[0] for k in ['Timeclock Summary', 'Total Paid', 'Active Employees', 'Timeclock Report', 'VIOLATION']):
-            continue
-        
-        # Employee Header (ID is digits, 3rd col exists)
         if parts[0].strip().isdigit() and len(parts) >= 3:
-            current_emp_id = parts[0].strip()
-            current_first_name = parts[1].strip()
-            current_last_name = parts[2].strip()
+            current_emp_id, current_first_name, current_last_name = parts[0].strip(), parts[1].strip(), parts[2].strip()
             continue
-        
-        # Data Line
         if len(parts) >= 6 and current_emp_id:
             day_idx = 2
             if parts[1] in ['*O', '*I', '**']: day_idx = 2
-            
             if len(parts) > day_idx + 4:
-                day_of_week = parts[day_idx].strip()
-                date_str_raw = parts[day_idx+1].strip()
-                end_time_raw = parts[day_idx+2].strip()
-                entry_type = parts[day_idx+3].strip()
-                duration = parts[day_idx+4].strip()
-                
-                if entry_type in ['Clockset', 'Clockset  ', 'Paid Break']:
-                    # Parse Date
-                    date_match = re.search(r'(\d{1,2}/\d{1,2}/\d{4})', date_str_raw)
-                    clean_date = date_match.group(1) if date_match else ''
-                    
-                    t1 = re.search(r'(\d{1,2}:\d{2})', date_str_raw)
-                    t2 = re.search(r'(\d{1,2}:\d{2})', end_time_raw)
-                    start_time = t1.group(1) if t1 else ''
-                    end_time = t2.group(1) if t2 else ''
-                    
-                    decimal_hours = parse_duration_to_decimal(duration)
-                    
+                day, d_raw, e_raw, e_type, dur = parts[day_idx], parts[day_idx+1], parts[day_idx+2], parts[day_idx+3], parts[day_idx+4]
+                if e_type.strip() in ['Clockset', 'Clockset  ', 'Paid Break']:
+                    d_m, t1, t2 = re.search(r'(\d{1,2}/\d{1,2}/\d{4})', d_raw), re.search(r'(\d{1,2}:\d{2})', d_raw), re.search(r'(\d{1,2}:\d{2})', e_raw)
                     data.append({
-                        'emp_id': current_emp_id,
-                        'first_name': current_first_name,
-                        'last_name': current_last_name,
-                        'day': day_of_week,
-                        'date': clean_date,
-                        'start_time': start_time,
-                        'end_time': end_time,
-                        'type': entry_type.strip(),
-                        'duration': duration,
-                        'decimal_hours': decimal_hours,
-                        'store_no': store_no
+                        'emp_id': current_emp_id, 'first_name': current_first_name, 'last_name': current_last_name,
+                        'day': day, 'date': d_m.group(1) if d_m else '', 'start_time': t1.group(1) if t1 else '',
+                        'end_time': t2.group(1) if t2 else '', 'type': e_type.strip(), 'duration': dur,
+                        'decimal_hours': parse_duration_to_decimal(dur), 'store_no': store_no
                     })
-
     return pd.DataFrame(data), store_no
 
 # ==========================================
@@ -339,7 +255,7 @@ def parse_timeclock_structure(content):
 def generate_formatted_data(df, store_no):
     if df.empty: return pd.DataFrame()
     daily_df = df[df['type'].isin(['Clockset', 'Paid Break'])].copy()
-    output_df = pd.DataFrame({
+    return pd.DataFrame({
         'store_no': store_no if store_no else daily_df.get('store_no', ''),
         'emp_id': daily_df['emp_id'],
         'first_name': daily_df['first_name'],
@@ -351,129 +267,49 @@ def generate_formatted_data(df, store_no):
         'type': daily_df['type'],
         'duration': daily_df['decimal_hours']
     })
-    return output_df
 
 def generate_pivot_data(df, store_no, pay_period_start):
     if df.empty: return pd.DataFrame()
-    reported_ot_df = df[df['type'] == 'Overtime_Reported'].copy()
     daily_clock_df = df[df['type'].isin(['Clockset', 'Paid Break'])].copy()
     if daily_clock_df.empty: return pd.DataFrame()
-
-    daily_clock_df[['date_obj', 'week']] = daily_clock_df['date'].apply(
-        lambda x: pd.Series(get_week_number(x, pay_period_start))
-    )
+    daily_clock_df[['date_obj', 'week']] = daily_clock_df['date'].apply(lambda x: pd.Series(get_week_number(x, pay_period_start)))
     daily_clock_df = daily_clock_df[daily_clock_df['week'].notna()].copy()
-
-    weekly_summary = daily_clock_df.groupby(['emp_id', 'first_name', 'last_name', 'week']).agg(
-        weekly_hours=('decimal_hours', 'sum')
-    ).reset_index()
-
-    weekly_summary['calc_regular'] = weekly_summary['weekly_hours'].apply(lambda x: min(x, 40))
-    weekly_summary['calc_overtime'] = weekly_summary['weekly_hours'].apply(lambda x: max(0, x - 40))
-
-    pivot = weekly_summary.groupby(['emp_id', 'first_name', 'last_name']).agg(
-        total_hours=('weekly_hours', 'sum'),
-        regular=('calc_regular', 'sum'),
-        overtime=('calc_overtime', 'sum')
-    ).reset_index()
-
+    ws = daily_clock_df.groupby(['emp_id', 'first_name', 'last_name', 'week']).agg(wh=('decimal_hours', 'sum')).reset_index()
+    ws['calc_reg'], ws['calc_ot'] = ws['wh'].apply(lambda x: min(x, 40)), ws['wh'].apply(lambda x: max(0, x - 40))
+    p = ws.groupby(['emp_id', 'first_name', 'last_name']).agg(total=('wh', 'sum'), regular=('calc_reg', 'sum'), overtime=('calc_ot', 'sum')).reset_index()
+    reported_ot_df = df[df['type'] == 'Overtime_Reported'].copy()
     if not reported_ot_df.empty:
-        reported_ot_summary = reported_ot_df.groupby('emp_id').agg(
-            reported_overtime=('decimal_hours', 'sum')
-        ).reset_index()
-        pivot = pd.merge(pivot, reported_ot_summary, on='emp_id', how='left')
-        pivot['overtime'] = pivot['reported_overtime'].fillna(pivot['overtime'])
-        pivot['regular'] = pivot['total_hours'] - pivot['overtime']
-        pivot.drop(columns=['reported_overtime'], inplace=True)
-
-    pivot['store_no'] = store_no
-    pivot['name'] = ''
-    pivot = pivot[['store_no', 'name', 'total_hours', 'regular', 'overtime', 'emp_id', 'first_name', 'last_name']]
-    pivot.columns = ['store no', 'name', 'total', 'regular', 'overtime', 'id', 'first name', 'last name']
-    cols = ['total', 'regular', 'overtime']
-    pivot[cols] = pivot[cols].round(2)
-    return pivot
+        rots = reported_ot_df.groupby('emp_id').agg(reported_overtime=('decimal_hours', 'sum')).reset_index()
+        p = pd.merge(p, rots, on='emp_id', how='left')
+        p['overtime'] = p['reported_overtime'].fillna(p['overtime'])
+        p['regular'] = p['total'] - p['overtime']
+        p.drop(columns=['reported_overtime'], inplace=True)
+    p['store_no'], p['name'] = store_no, ''
+    p = p[['store_no', 'name', 'total', 'regular', 'overtime', 'emp_id', 'first_name', 'last_name']]
+    p.columns = ['store no', 'name', 'total', 'regular', 'overtime', 'id', 'first name', 'last name']
+    return p.round(2)
 
 def generate_wage_split_data(df, store_no, pay_period_start, wage_change_date):
     if df.empty: return pd.DataFrame()
     daily_clock_df = df[df['type'].isin(['Clockset', 'Paid Break'])].copy()
-    reported_ot_df = df[df['type'] == 'Overtime_Reported'].copy()
     if daily_clock_df.empty: return pd.DataFrame()
-
-    daily_clock_df[['date_obj', 'week']] = daily_clock_df['date'].apply(
-        lambda x: pd.Series(get_week_number(x, pay_period_start))
-    )
+    daily_clock_df[['date_obj', 'week']] = daily_clock_df['date'].apply(lambda x: pd.Series(get_week_number(x, pay_period_start)))
     daily_clock_df = daily_clock_df[daily_clock_df['week'].notna()].copy()
-    
-    # Convert wage_change_date to datetime for comparison
     wc_date = datetime.combine(wage_change_date, datetime.min.time())
-    
-    daily_clock_df['wage_period'] = daily_clock_df['date_obj'].apply(
-        lambda x: '2025' if x < wc_date else '2026'
-    )
-
-    weekly_totals = daily_clock_df.groupby(['emp_id', 'first_name', 'last_name', 'week']).agg(
-        weekly_total_hours=('decimal_hours', 'sum'),
-        spans_wage_change=('wage_period', lambda x: x.nunique() > 1)
-    ).reset_index()
-
-    weekly_totals['weekly_regular_hours'] = weekly_totals['weekly_total_hours'].apply(lambda x: min(x, 40))
-    weekly_totals['weekly_ot_hours'] = weekly_totals['weekly_total_hours'].apply(lambda x: max(0, x - 40))
-
-    daily_clock_df = pd.merge(daily_clock_df, weekly_totals[['emp_id', 'week', 'weekly_total_hours', 'weekly_regular_hours', 'weekly_ot_hours']], on=['emp_id', 'week'], how='left')
-
-    daily_clock_df['day_proportion'] = daily_clock_df.apply(
-        lambda row: row['decimal_hours'] / row['weekly_total_hours'] if row['weekly_total_hours'] > 0 else 0, axis=1
-    )
-    daily_clock_df['day_regular_hours'] = daily_clock_df['day_proportion'] * daily_clock_df['weekly_regular_hours']
-    daily_clock_df['day_ot_hours'] = daily_clock_df['day_proportion'] * daily_clock_df['weekly_ot_hours']
-
-    wage_period_summary = daily_clock_df.groupby(['emp_id', 'first_name', 'last_name', 'wage_period']).agg(
-        total_hours=('decimal_hours', 'sum'),
-        regular_hours=('day_regular_hours', 'sum'),
-        ot_hours=('day_ot_hours', 'sum')
-    ).reset_index()
-
-    if not reported_ot_df.empty:
-        reported_ot_summary = reported_ot_df.groupby('emp_id').agg(reported_overtime=('decimal_hours', 'sum')).reset_index()
-        calc_ot_totals = wage_period_summary.groupby('emp_id')['ot_hours'].sum().reset_index()
-        calc_ot_totals.columns = ['emp_id', 'calc_ot_total']
-        wage_period_summary = pd.merge(wage_period_summary, reported_ot_summary, on='emp_id', how='left')
-        wage_period_summary = pd.merge(wage_period_summary, calc_ot_totals, on='emp_id', how='left')
-        
-        wage_period_summary['ot_ratio'] = wage_period_summary.apply(
-            lambda row: row['ot_hours'] / row['calc_ot_total'] if row['calc_ot_total'] > 0 else 0, axis=1
-        )
-        wage_period_summary['final_ot'] = wage_period_summary.apply(
-            lambda row: row['reported_overtime'] * row['ot_ratio'] if pd.notna(row['reported_overtime']) else row['ot_hours'], axis=1
-        )
-        wage_period_summary['final_regular'] = wage_period_summary['total_hours'] - wage_period_summary['final_ot']
-        wage_period_summary['ot_hours'] = wage_period_summary['final_ot']
-        wage_period_summary['regular_hours'] = wage_period_summary['final_regular']
-        wage_period_summary.drop(columns=['reported_overtime', 'calc_ot_total', 'ot_ratio', 'final_ot', 'final_regular'], inplace=True)
-
-    wage_period_summary.rename(columns={'regular_hours': 'regular', 'ot_hours': 'overtime'}, inplace=True)
-
-    pivot_2025 = wage_period_summary[wage_period_summary['wage_period'] == '2025'][['emp_id', 'first_name', 'last_name', 'total_hours', 'regular', 'overtime']].copy()
-    pivot_2025.columns = ['emp_id', 'first_name', 'last_name', 'total_hours_2025', 'regular_2025', 'overtime_2025']
-    
-    pivot_2026 = wage_period_summary[wage_period_summary['wage_period'] == '2026'][['emp_id', 'first_name', 'last_name', 'total_hours', 'regular', 'overtime']].copy()
-    pivot_2026.columns = ['emp_id', 'first_name', 'last_name', 'total_hours_2026', 'regular_2026', 'overtime_2026']
-
-    pivot_wide = pd.merge(pivot_2025, pivot_2026, on=['emp_id', 'first_name', 'last_name'], how='outer').fillna(0)
-    pivot_wide.insert(0, 'store_no', store_no)
-    pivot_wide.insert(1, 'name', '')
-    pivot_wide.rename(columns={'emp_id': 'id', 'first_name': 'first name', 'last_name': 'last name'}, inplace=True)
-    
-    column_order = [
-        'store_no', 'name', 'id', 'first name', 'last name',
-        'total_hours_2025', 'regular_2025', 'overtime_2025',
-        'total_hours_2026', 'regular_2026', 'overtime_2026'
-    ]
-    pivot_wide = pivot_wide[[c for c in column_order if c in pivot_wide.columns]]
-    numeric_cols = [c for c in pivot_wide.columns if 'hours' in c or 'regular' in c or 'overtime' in c]
-    pivot_wide[numeric_cols] = pivot_wide[numeric_cols].round(2)
-    return pivot_wide
+    daily_clock_df['wage_period'] = daily_clock_df['date_obj'].apply(lambda x: '2025' if x < wc_date else '2026')
+    wt = daily_clock_df.groupby(['emp_id', 'first_name', 'last_name', 'week']).agg(twh=('decimal_hours', 'sum')).reset_index()
+    wt['wrh'], wt['woh'] = wt['twh'].apply(lambda x: min(x, 40)), wt['twh'].apply(lambda x: max(0, x - 40))
+    daily_clock_df = pd.merge(daily_clock_df, wt[['emp_id', 'week', 'twh', 'wrh', 'woh']], on=['emp_id', 'week'], how='left')
+    daily_clock_df['dp'] = daily_clock_df.apply(lambda r: r['decimal_hours'] / r['twh'] if r['twh'] > 0 else 0, axis=1)
+    daily_clock_df['drh'], daily_clock_df['doh'] = daily_clock_df['dp'] * daily_clock_df['wrh'], daily_clock_df['dp'] * daily_clock_df['woh']
+    summary = daily_clock_df.groupby(['emp_id', 'first_name', 'last_name', 'wage_period']).agg(th=('decimal_hours', 'sum'), rh=('drh', 'sum'), oh=('doh', 'sum')).reset_index()
+    p25 = summary[summary['wage_period'] == '2025'][['emp_id', 'first_name', 'last_name', 'th', 'rh', 'oh']].rename(columns={'th':'total_hours_2025', 'rh':'regular_2025', 'oh':'overtime_2025'})
+    p26 = summary[summary['wage_period'] == '2026'][['emp_id', 'first_name', 'last_name', 'th', 'rh', 'oh']].rename(columns={'th':'total_hours_2026', 'rh':'regular_2026', 'oh':'overtime_2026'})
+    wide = pd.merge(p25, p26, on=['emp_id', 'first_name', 'last_name'], how='outer').fillna(0)
+    wide.insert(0, 'store_no', store_no)
+    wide.insert(1, 'name', '')
+    wide.rename(columns={'emp_id': 'id', 'first_name': 'first name', 'last_name': 'last name'}, inplace=True)
+    return wide.round(2)
 
 # ==========================================
 # 5. STREAMLIT APP INTERFACE
@@ -482,7 +318,6 @@ def generate_wage_split_data(df, store_no, pay_period_start, wage_change_date):
 st.title("📊 Payroll & Timeclock Processor")
 st.markdown("Upload multiple store CSV files, set your dates, and download a consolidated report in one click.")
 
-# --- DATES CONFIGURATION (Moved to Main Page for easy access) ---
 st.markdown("### ⚙️ Step 1: Configuration")
 expander = st.expander("Click to set Pay Period and Wage Dates", expanded=True)
 with expander:
@@ -494,11 +329,9 @@ with expander:
         wage_change_active = st.checkbox("Apply Wage Split?", value=True)
         wage_change_date = st.date_input("Wage Change Date", value=datetime(2026, 1, 1)) if wage_change_active else None
 
-# --- FILE UPLOADER ---
 st.markdown("### 📁 Step 2: Upload Files")
 uploaded_files = st.file_uploader("Drop your CSV Files here (Select Multiple)", accept_multiple_files=True, type=['csv'])
 
-# --- PROCESSING BUTTON ---
 if st.button("🚀 Start Processing", type="primary"):
     if not uploaded_files:
         st.error("Please upload at least one CSV file.")
@@ -509,16 +342,12 @@ if st.button("🚀 Start Processing", type="primary"):
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        # 1. READ AND PARSE FILES
         for i, uploaded_file in enumerate(uploaded_files):
             status_text.text(f"Processing {uploaded_file.name}...")
-            
-            # Read content as string
             try:
                 stringio = io.StringIO(uploaded_file.getvalue().decode("utf-8"))
                 content = stringio.read()
             except UnicodeDecodeError:
-                # Fallback for other encodings if utf-8 fails
                 stringio = io.StringIO(uploaded_file.getvalue().decode("latin-1"))
                 content = stringio.read()
 
@@ -538,62 +367,32 @@ if st.button("🚀 Start Processing", type="primary"):
                 else:
                     store_data[store_no] = df
                 processed_count += 1
-            
-            # Update progress
             progress_bar.progress((i + 1) / len(uploaded_files))
 
         status_text.text("Generating reports...")
-        
-        # 2. GENERATE OUTPUTS
-        all_formatted = []
-        all_pivot = []
-        all_wage_split = []
+        all_formatted, all_pivot, all_wage_split = [], [], []
+        pp_start_dt = datetime.combine(pay_period_start, datetime.min.time())
 
         for store_no in sorted(store_data.keys()):
             df = store_data[store_no]
-            
-            # Convert inputs to datetime for logic if they aren't already
-            pp_start_dt = datetime.combine(pay_period_start, datetime.min.time())
-            
-            formatted_df = generate_formatted_data(df, store_no)
-            pivot_df = generate_pivot_data(df, store_no, pp_start_dt)
-            
-            if not formatted_df.empty: all_formatted.append(formatted_df)
-            if not pivot_df.empty: all_pivot.append(pivot_df)
-            
+            all_formatted.append(generate_formatted_data(df, store_no))
+            all_pivot.append(generate_pivot_data(df, store_no, pp_start_dt))
             if wage_change_active and wage_change_date:
-                wc_date_dt = datetime.combine(wage_change_date, datetime.min.time())
-                wage_split_df = generate_wage_split_data(df, store_no, pp_start_dt, wage_change_date)
-                if not wage_split_df.empty: all_wage_split.append(wage_split_df)
+                all_wage_split.append(generate_wage_split_data(df, store_no, pp_start_dt, wage_change_date))
 
-        # 3. CREATE ZIP FILE IN MEMORY
-        if not all_formatted and not all_pivot:
+        if not all_formatted:
             st.warning("No valid data was extracted. Please check your files.")
         else:
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w") as zf:
-                
-                # Add Formatted CSV
                 if all_formatted:
-                    combined_formatted = pd.concat(all_formatted, ignore_index=True)
-                    csv_data = combined_formatted.to_csv(index=False).encode('utf-8')
-                    zf.writestr("All_Stores_Formatted.csv", csv_data)
-                
-                # Add Pivot CSV
+                    zf.writestr("All_Stores_Formatted.csv", pd.concat(all_formatted).to_csv(index=False).encode('utf-8'))
                 if all_pivot:
-                    combined_pivot = pd.concat(all_pivot, ignore_index=True)
-                    csv_data = combined_pivot.to_csv(index=False).encode('utf-8')
-                    zf.writestr("All_Stores_Pivot.csv", csv_data)
-                    
-                # Add Wage Split CSV
+                    zf.writestr("All_Stores_Pivot.csv", pd.concat(all_pivot).to_csv(index=False).encode('utf-8'))
                 if all_wage_split:
-                    combined_wage = pd.concat(all_wage_split, ignore_index=True)
-                    csv_data = combined_wage.to_csv(index=False).encode('utf-8')
-                    zf.writestr("All_Stores_WageSplit.csv", csv_data)
+                    zf.writestr("All_Stores_WageSplit.csv", pd.concat(all_wage_split).to_csv(index=False).encode('utf-8'))
             
             st.success(f"Processing Complete! Processed {len(store_data)} stores.")
-            
-            # 4. DOWNLOAD BUTTON
             st.download_button(
                 label="📥 Download Results (ZIP)",
                 data=zip_buffer.getvalue(),
