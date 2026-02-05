@@ -6,19 +6,25 @@ import zipfile
 from datetime import datetime
 
 # ==========================================
-# 0. PAGE CONFIG & KIOSK MODE (HIDES GITHUB LINKS)
+# 0. PAGE CONFIG & KIOSK MODE (CLEAN UI)
 # ==========================================
 
 # This must be the very first Streamlit command
 st.set_page_config(page_title="Payroll Processor", layout="wide")
 
-# CSS to hide the top header, hamburger menu, and footer
+# CSS to hide the top header, hamburger menu, footer, and "Manage app" button
+# This version targets the deploy button specifically to ensure it's removed.
 hide_st_style = """
             <style>
-            #MainMenu {visibility: hidden;}
-            footer {visibility: hidden;}
-            header {visibility: hidden;}
-            .stDeployButton {display:none;}
+            #MainMenu {visibility: hidden !important;}
+            footer {visibility: hidden !important;}
+            header {visibility: hidden !important;}
+            .stDeployButton {display:none !important;}
+            .stAppDeployButton {display:none !important;}
+            /* Adjust padding since header is hidden */
+            .block-container {
+                padding-top: 2rem !important;
+            }
             </style>
             """
 st.markdown(hide_st_style, unsafe_allow_html=True)
@@ -476,22 +482,24 @@ def generate_wage_split_data(df, store_no, pay_period_start, wage_change_date):
 st.title("📊 Payroll & Timeclock Processor")
 st.markdown("Upload multiple store CSV files, set your dates, and download a consolidated report in one click.")
 
-# --- SIDEBAR INPUTS ---
-st.sidebar.header("Configuration")
+# --- DATES CONFIGURATION (Moved to Main Page for easy access) ---
+st.markdown("### ⚙️ Step 1: Configuration")
+expander = st.expander("Click to set Pay Period and Wage Dates", expanded=True)
+with expander:
+    col_a, col_b = st.columns(2)
+    with col_a:
+        today = datetime.now()
+        pay_period_start = st.date_input("Pay Period Start Date", value=today)
+    with col_b:
+        wage_change_active = st.checkbox("Apply Wage Split?", value=True)
+        wage_change_date = st.date_input("Wage Change Date", value=datetime(2026, 1, 1)) if wage_change_active else None
 
-# Date Pickers
-today = datetime.now()
-pay_period_start = st.sidebar.date_input("Pay Period Start Date", value=today)
-wage_change_active = st.sidebar.checkbox("Apply Wage Split?", value=False)
-wage_change_date = None
-if wage_change_active:
-    wage_change_date = st.sidebar.date_input("Wage Change Date", value=datetime(2026, 1, 1))
-
-# File Uploader
-uploaded_files = st.file_uploader("Upload CSV Files (Select Multiple)", accept_multiple_files=True, type=['csv'])
+# --- FILE UPLOADER ---
+st.markdown("### 📁 Step 2: Upload Files")
+uploaded_files = st.file_uploader("Drop your CSV Files here (Select Multiple)", accept_multiple_files=True, type=['csv'])
 
 # --- PROCESSING BUTTON ---
-if st.button("Start Processing", type="primary"):
+if st.button("🚀 Start Processing", type="primary"):
     if not uploaded_files:
         st.error("Please upload at least one CSV file.")
     else:
@@ -590,5 +598,6 @@ if st.button("Start Processing", type="primary"):
                 label="📥 Download Results (ZIP)",
                 data=zip_buffer.getvalue(),
                 file_name="payroll_results.zip",
-                mime="application/zip"
+                mime="application/zip",
+                use_container_width=True
             )
