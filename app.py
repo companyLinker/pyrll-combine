@@ -6,6 +6,24 @@ import zipfile
 from datetime import datetime
 
 # ==========================================
+# 0. PAGE CONFIG & KIOSK MODE (HIDES GITHUB LINKS)
+# ==========================================
+
+# This must be the very first Streamlit command
+st.set_page_config(page_title="Payroll Processor", layout="wide")
+
+# CSS to hide the top header, hamburger menu, and footer
+hide_st_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            header {visibility: hidden;}
+            .stDeployButton {display:none;}
+            </style>
+            """
+st.markdown(hide_st_style, unsafe_allow_html=True)
+
+# ==========================================
 # 1. SHARED UTILITY FUNCTIONS
 # ==========================================
 
@@ -309,7 +327,7 @@ def parse_timeclock_structure(content):
     return pd.DataFrame(data), store_no
 
 # ==========================================
-# 4. DATA GENERATION FUNCTIONS (Unchanged logic)
+# 4. DATA GENERATION FUNCTIONS
 # ==========================================
 
 def generate_formatted_data(df, store_no):
@@ -454,8 +472,6 @@ def generate_wage_split_data(df, store_no, pay_period_start, wage_change_date):
 # ==========================================
 # 5. STREAMLIT APP INTERFACE
 # ==========================================
-
-st.set_page_config(page_title="Payroll Processor", layout="wide")
 
 st.title("📊 Payroll & Timeclock Processor")
 st.markdown("Upload multiple store CSV files, set your dates, and download a consolidated report in one click.")
