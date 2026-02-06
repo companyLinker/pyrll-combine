@@ -13,39 +13,24 @@ from datetime import datetime
 st.set_page_config(page_title="Payroll Processor", layout="wide")
 
 # CSS to hide the top header, hamburger menu, footer, "Manage app" button,
-# and specifically the profile container and Streamlit host badge you identified.
+# and specifically the profile container and Streamlit host badge.
 hide_st_style = """
             <style>
-            /* Hide the main top header bar */
             header {visibility: hidden !important;}
-            
-            /* Hide the hamburger menu */
             #MainMenu {visibility: hidden !important;}
-            
-            /* Hide the standard footer */
             footer {visibility: hidden !important;}
-            
-            /* Hide deployment and "Manage app" buttons */
             .stDeployButton {display:none !important;}
             .stAppDeployButton {display:none !important;}
             
-            /* TARGET SPECIFIC ELEMENTS FROM YOUR INSPECTION */
-            /* This removes the profile container/avatar in the bottom right */
             [class*="_profileContainer_"], [class*="_profilePreview_"] {
                 display: none !important;
             }
-            
-            /* This removes the "Hosted with Streamlit" badge and SVG in the bottom right */
             [class*="_viewerBadge_"], [class*="_container_gzau3_"] {
                 display: none !important;
             }
-            
-            /* Generic catch-all for any action buttons or status widgets in the corners */
             .stActionButton, .stStatusWidget, [data-testid="stStatusWidget"], [data-testid="appCreatorAvatar"] {
                 display: none !important;
             }
-            
-            /* Adjust padding since header is hidden */
             .block-container {
                 padding-top: 1rem !important;
             }
@@ -128,13 +113,10 @@ def parse_payroll_structure(content):
     for line in file_lines:
         line = line.strip()
         if not line: continue
-        
-        if "Popeye's" in line or "Popeyes" in line or "POPEYES" in line:
+        if any(x in line for x in ["Popeye's", "Popeyes", "POPEYES"]):
             match = re.search(r"(?:Popeye's|Popeyes|POPEYES)\s*#?\s*(\d+)", line, re.IGNORECASE)
-            if not match: 
-                match = re.search(r'#(\d+)', line)
-            if match: 
-                store_no = match.group(1)
+            if not match: match = re.search(r'#(\d+)', line)
+            if match: store_no = match.group(1)
             continue
         
         parts = None
@@ -209,8 +191,7 @@ def parse_payroll_structure(content):
             match = name_map[name_map['emp_id'].str.startswith(str(row['emp_id']), na=False)]
             if not match.empty:
                 df.loc[index, 'first_name'], df.loc[index, 'last_name'] = match.iloc[0]['first_name'], match.iloc[0]['last_name']
-            else:
-                df.drop(index, inplace=True)
+            else: df.drop(index, inplace=True)
     return df, store_no
 
 # ==========================================
@@ -218,8 +199,7 @@ def parse_payroll_structure(content):
 # ==========================================
 
 def parse_timeclock_structure(content):
-    data = []
-    current_emp_id, current_first_name, current_last_name, store_no = None, None, None, None
+    data, current_emp_id, current_first_name, current_last_name, store_no = [], None, None, None, None
     lines = content.splitlines()
     for line in lines:
         line = line.strip()
@@ -328,6 +308,9 @@ with expander:
     with col_b:
         wage_change_active = st.checkbox("Apply Wage Split?", value=True)
         wage_change_date = st.date_input("Wage Change Date", value=datetime(2026, 1, 1)) if wage_change_active else None
+    
+    # NEW FEATURE: Separate Output Checkbox
+    separate_output = st.checkbox("Generate Separate Output for each File?", value=False)
 
 st.markdown("### 📁 Step 2: Upload Files")
 uploaded_files = st.file_uploader("Drop your CSV Files here (Select Multiple)", accept_multiple_files=True, type=['csv'])
@@ -336,63 +319,69 @@ if st.button("🚀 Start Processing", type="primary"):
     if not uploaded_files:
         st.error("Please upload at least one CSV file.")
     else:
-        store_data = {}
-        processed_count = 0
-        
+        # Dictionary to store results
+        # If combined: { "all": DataFrame }
+        # If separate: { "filename": DataFrame }
+        processed_data_map = {}
         progress_bar = st.progress(0)
         status_text = st.empty()
-        
-        for i, uploaded_file in enumerate(uploaded_files):
-            status_text.text(f"Processing {uploaded_file.name}...")
-            try:
-                stringio = io.StringIO(uploaded_file.getvalue().decode("utf-8"))
-                content = stringio.read()
-            except UnicodeDecodeError:
-                stringio = io.StringIO(uploaded_file.getvalue().decode("latin-1"))
-                content = stringio.read()
-
-            file_format = detect_file_format(content)
-            
-            df = pd.DataFrame()
-            store_no = None
-            
-            if file_format == 'payroll':
-                df, store_no = parse_payroll_structure(content)
-            elif file_format == 'timeclock':
-                df, store_no = parse_timeclock_structure(content)
-            
-            if not df.empty and store_no:
-                if store_no in store_data:
-                    store_data[store_no] = pd.concat([store_data[store_no], df], ignore_index=True)
-                else:
-                    store_data[store_no] = df
-                processed_count += 1
-            progress_bar.progress((i + 1) / len(uploaded_files))
-
-        status_text.text("Generating reports...")
-        all_formatted, all_pivot, all_wage_split = [], [], []
         pp_start_dt = datetime.combine(pay_period_start, datetime.min.time())
 
-        for store_no in sorted(store_data.keys()):
-            df = store_data[store_no]
-            all_formatted.append(generate_formatted_data(df, store_no))
-            all_pivot.append(generate_pivot_data(df, store_no, pp_start_dt))
-            if wage_change_active and wage_change_date:
-                all_wage_split.append(generate_wage_split_data(df, store_no, pp_start_dt, wage_change_date))
+        for i, uploaded_file in enumerate(uploaded_files):
+            status_text.text(f"Processing {uploaded_file.name}...")
+            
+            try:
+                content = uploaded_file.getvalue().decode("utf-8")
+            except UnicodeDecodeError:
+                content = uploaded_file.getvalue().decode("latin-1")
 
-        if not all_formatted:
+            file_format = detect_file_format(content)
+            df, store_no = (parse_payroll_structure(content) if file_format == 'payroll' else parse_timeclock_structure(content))
+            
+            if not df.empty and store_no:
+                if separate_output:
+                    # Keep per filename
+                    # Remove .csv from name for folder naming
+                    clean_name = re.sub(r'\.csv$', '', uploaded_file.name, flags=re.IGNORECASE)
+                    processed_data_map[clean_name] = {store_no: df}
+                else:
+                    # Standard Combined Logic
+                    if "combined" not in processed_data_map:
+                        processed_data_map["combined"] = {}
+                    if store_no in processed_data_map["combined"]:
+                        processed_data_map["combined"][store_no] = pd.concat([processed_data_map["combined"][store_no], df], ignore_index=True)
+                    else:
+                        processed_data_map["combined"][store_no] = df
+            
+            progress_bar.progress((i + 1) / len(uploaded_files))
+
+        if not processed_data_map:
             st.warning("No valid data was extracted. Please check your files.")
         else:
+            status_text.text("Generating ZIP file...")
             zip_buffer = io.BytesIO()
-            with zipfile.ZipFile(zip_buffer, "w") as zf:
-                if all_formatted:
-                    zf.writestr("All_Stores_Formatted.csv", pd.concat(all_formatted).to_csv(index=False).encode('utf-8'))
-                if all_pivot:
-                    zf.writestr("All_Stores_Pivot.csv", pd.concat(all_pivot).to_csv(index=False).encode('utf-8'))
-                if all_wage_split:
-                    zf.writestr("All_Stores_WageSplit.csv", pd.concat(all_wage_split).to_csv(index=False).encode('utf-8'))
             
-            st.success(f"Processing Complete! Processed {len(store_data)} stores.")
+            with zipfile.ZipFile(zip_buffer, "w") as zf:
+                for group_name, store_dict in processed_data_map.items():
+                    all_fmt, all_pvt, all_wge = [], [], []
+                    
+                    for s_no, df in sorted(store_dict.items()):
+                        all_fmt.append(generate_formatted_data(df, s_no))
+                        all_pvt.append(generate_pivot_data(df, s_no, pp_start_dt))
+                        if wage_change_active and wage_change_date:
+                            all_wge.append(generate_wage_split_data(df, s_no, pp_start_dt, wage_change_date))
+
+                    # Path prefix inside zip
+                    prefix = "" if group_name == "combined" else f"{group_name}/"
+
+                    if all_fmt:
+                        zf.writestr(f"{prefix}All_Stores_Formatted.csv", pd.concat(all_fmt).to_csv(index=False).encode('utf-8'))
+                    if all_pvt:
+                        zf.writestr(f"{prefix}All_Stores_Pivot.csv", pd.concat(all_pvt).to_csv(index=False).encode('utf-8'))
+                    if all_wge:
+                        zf.writestr(f"{prefix}All_Stores_WageSplit.csv", pd.concat(all_wge).to_csv(index=False).encode('utf-8'))
+
+            st.success("Processing Complete!")
             st.download_button(
                 label="📥 Download Results (ZIP)",
                 data=zip_buffer.getvalue(),
